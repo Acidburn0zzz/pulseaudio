@@ -88,7 +88,10 @@ EOF
             ;;
     esac
 
-    shift
+    # don't try to shift nonexisting args
+    if [ $1 ]; then
+        shift
+    fi
 done
 
 eval "exec '@PA_BINARY@'$ARGS"
