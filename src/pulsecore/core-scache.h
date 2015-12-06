@@ -25,7 +25,6 @@
 #include <pulsecore/memchunk.h>
 #include <pulsecore/sink.h>
 
-#define PA_SCACHE_ENTRY_SIZE_MAX (1024*1024*16)
 
 typedef struct pa_scache_entry {
     uint32_t index;
@@ -65,4 +64,5 @@ size_t pa_scache_total_size(pa_core *c);
 
 void pa_scache_unload_unused(pa_core *c);
 
+#define PA_SCACHE_ENTRY_SIZE_MAX (1024*1024*16)
 #endif
