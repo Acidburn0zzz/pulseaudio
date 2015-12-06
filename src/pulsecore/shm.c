@@ -375,8 +375,11 @@ int pa_shm_cleanup(void) {
         if (strncmp(de->d_name, "pulse-shm-", SHM_ID_LEN))
 #endif
             continue;
-
+#if defined(__sun)
+        if (pa_atou(de->d_name + 10, &id) < 0)
+#else
         if (pa_atou(de->d_name + SHM_ID_LEN, &id) < 0)
+#endif
             continue;
 
         if (shm_attach(&seg, id, false, true) < 0)
