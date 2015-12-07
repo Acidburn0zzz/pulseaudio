@@ -158,8 +158,8 @@ static void update_rule(struct rule *r) {
         /* Let's try a more aggressive search, but only one level */
         if ((desktopfiles_dir = opendir(DESKTOPFILEDIR))) {
             while ((dir = readdir(desktopfiles_dir))) {
-                if (dir->d_type != DT_DIR
-                    || pa_streq(dir->d_name, ".")
+                if (/* dir->d_type != DT_DIR
+                    || */ pa_streq(dir->d_name, ".")
                     || pa_streq(dir->d_name, ".."))
                     continue;
 
