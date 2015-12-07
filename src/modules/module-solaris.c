@@ -135,6 +135,7 @@ static const char* const valid_modargs[] = {
 static uint64_t get_playback_buffered_bytes(struct userdata *u) {
     audio_info_t info;
     uint64_t played_bytes;
+    int64_t buffered_bytes;
     int err;
 
     pa_assert(u->sink);
@@ -161,10 +162,13 @@ static uint64_t get_playback_buffered_bytes(struct userdata *u) {
 
     pa_smoother_put(u->smoother, pa_rtclock_now(), pa_bytes_to_usec(played_bytes, &u->sink->sample_spec));
 
-    if (u->written_bytes > played_bytes)
-        return u->written_bytes - played_bytes;
-    else
-        return 0;
+    buffered_bytes = u->written_bytes - played_bytes;
+
+    if (buffered_bytes < 0) {
+        buffered_bytes = 0;
+    }
+
+    return (uint64_t) buffered_bytes;
 }
 
 static pa_usec_t sink_get_latency(struct userdata *u, pa_sample_spec *ss) {
@@ -415,7 +419,7 @@ static int sink_process_msg(pa_msgobject *o, int code, void *data, int64_t offse
                             if (unsuspend(u) < 0)
                                 return -1;
                             u->sink->get_volume(u->sink);
-                            u->sink->get_mute(u->sink);
+                            u->sink->get_mute(u->sink,(_Bool*)1);
                         }
                         u->sink_suspended = false;
                     }
@@ -486,14 +490,26 @@ static int source_process_msg(pa_msgobject *o, int code, void *data, int64_t off
 static void sink_set_volume(pa_sink *s) {
     struct userdata *u;
     audio_info_t info;
+    pa_volume_t v;
 
     pa_assert_se(u = s->userdata);
+
+    if (u->fd < 0) {
+       u->fd = pa_open_cloexec(u->device_name, u->mode | O_NONBLOCK, 0);
+    }
 
     if (u->fd >= 0) {
         AUDIO_INITINFO(&info);
 
-        info.play.gain = pa_cvolume_max(&s->real_volume) * AUDIO_MAX_GAIN / PA_VOLUME_NORM;
-        pa_assert(info.play.gain <= AUDIO_MAX_GAIN);
+        v = pa_cvolume_max(&s->real_volume);
+        if (v > PA_VOLUME_NORM) {
+                v = PA_VOLUME_NORM;
+        }
+
+        info.play.gain = v * AUDIO_MAX_GAIN / PA_VOLUME_NORM;
+
+        pa_log_debug("PA_VOLUME_NORM is %ld", PA_VOLUME_NORM);
+        pa_log_debug("Setting volume %ld %ld", v, info.play.gain);
 
         if (ioctl(u->fd, AUDIO_SETINFO, &info) < 0) {
             if (errno == EINVAL)
@@ -513,22 +529,29 @@ static void sink_get_volume(pa_sink *s) {
     if (u->fd >= 0) {
         if (ioctl(u->fd, AUDIO_GETINFO, &info) < 0)
             pa_log("AUDIO_SETINFO: %s", pa_cstrerror(errno));
-        else
+        else {
+            pa_log_debug("Getting volume %ld %ld", info.play.gain, (info.play.gain * PA_VOLUME_NORM / AUDIO_MAX_GAIN));
             pa_cvolume_set(&s->real_volume, s->sample_spec.channels, info.play.gain * PA_VOLUME_NORM / AUDIO_MAX_GAIN);
+        }
     }
 }
 
 static void source_set_volume(pa_source *s) {
     struct userdata *u;
     audio_info_t info;
+    pa_volume_t v;
 
     pa_assert_se(u = s->userdata);
 
     if (u->fd >= 0) {
         AUDIO_INITINFO(&info);
 
-        info.play.gain = pa_cvolume_max(&s->real_volume) * AUDIO_MAX_GAIN / PA_VOLUME_NORM;
-        pa_assert(info.play.gain <= AUDIO_MAX_GAIN);
+        v = pa_cvolume_max(&s->real_volume);
+        if (v > PA_VOLUME_NORM) {
+                v = PA_VOLUME_NORM;
+        }
+
+        info.play.gain = v * AUDIO_MAX_GAIN / PA_VOLUME_NORM;
 
         if (ioctl(u->fd, AUDIO_SETINFO, &info) < 0) {
             if (errno == EINVAL)
@@ -1034,7 +1057,7 @@ int pa__init(pa_module *m) {
         if (sink_new_data.muted_is_set)
             u->sink->set_mute(u->sink);
         else
-            u->sink->get_mute(u->sink);
+            u->sink->get_mute(u->sink,(_Bool*)1);
 
         pa_sink_put(u->sink);
     }
