@@ -29,11 +29,21 @@ int pa_oss_auto_format(int fd, pa_sample_spec *ss);
 
 int pa_oss_set_fragments(int fd, int frags, int frag_size);
 
+#define HAVE_OSSV4
+
+#ifdef HAVE_OSSV4
+int pa_oss_set_volume(int fd, oss_mixext *mixext, const pa_sample_spec *ss, const pa_cvolume *volume);
+int pa_oss_get_volume(int fd, oss_mixext *mixext, const pa_sample_spec *ss, pa_cvolume *volume);
+
+#else
+
 int pa_oss_set_volume(int fd, unsigned long mixer, const pa_sample_spec *ss, const pa_cvolume *volume);
 int pa_oss_get_volume(int fd, unsigned long mixer, const pa_sample_spec *ss, pa_cvolume *volume);
+#endif
 
 int pa_oss_get_hw_description(const char *dev, char *name, size_t l);
 
 int pa_oss_open_mixer_for_device(const char *device);
+int pa_oss_open_mixer(const char *device);
 
 #endif

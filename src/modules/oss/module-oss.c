@@ -32,6 +32,10 @@
  *
  */
 
+#define HAVE_OSSV4
+#define TRUE 1
+#define FALSE 0
+
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
@@ -123,7 +127,18 @@ struct userdata {
     int mode;
 
     int mixer_fd;
+
+#ifdef HAVE_OSSV4
+    int mixer_dev;
+    int mixer_sink_control;
+    int mixer_source_control;
+    int mixer_cmax;
+    int mixer_dsp_fd;
+    oss_mixext sink_mixext;
+    oss_mixext source_mixext;
+#else
     int mixer_devmask;
+#endif
 
     int nfrags, frag_size, orig_frag_size;
 
@@ -809,6 +824,160 @@ static int source_process_msg(pa_msgobject *o, int code, void *data, int64_t off
     return ret;
 }
 
+#ifdef HAVE_OSSV4
+
+static const char *
+mixer_ext_type_get_name (int type)
+{
+    switch (type) {
+        case MIXT_DEVROOT:
+            return "Device root entry";
+        case MIXT_GROUP:
+            return "Controller group";
+        case MIXT_ONOFF:
+            return "On/Off switch";
+        case MIXT_ENUM:
+            return "Enumeration control";
+        case MIXT_MONOSLIDER:
+            return "Mono slider (0-255)";
+        case MIXT_STEREOSLIDER:
+            return "Stereo slider (0-255)";
+        case MIXT_MESSAGE:
+            return "Textual message";
+        case MIXT_MONOVU:
+            return "Mono VU meter value";
+        case MIXT_STEREOVU:
+            return "Stereo VU meter value";
+        case MIXT_MONOPEAK:
+            return "Mono VU meter peak value";
+        case MIXT_STEREOPEAK:
+            return "Stereo VU meter peak value";
+        case MIXT_RADIOGROUP:
+            return "Radio button group";
+        case MIXT_MARKER:
+            /* Separator between normal and extension entries */
+            return "Separator";
+        case MIXT_VALUE:
+            return "Decimal value entry";
+        case MIXT_HEXVALUE:
+            return "Hex value entry";
+        case MIXT_SLIDER:
+            return "Mono slider (31-bit value range)";
+        case MIXT_3D:
+            return "3D";
+        case MIXT_MONOSLIDER16:
+            return "Mono slider (0-32767)";
+        case MIXT_STEREOSLIDER16:
+            return "Stereo slider (0-32767)";
+        case MIXT_MUTE:
+            return "Mute switch";
+        default:
+            break;
+    }
+
+    return "Unknown";
+}
+
+void
+mixer_showflags (int flags)
+{
+    struct
+    {
+        int flag;
+        char nick[16];
+    } all_flags[] = {
+        /* first the important ones */
+        {
+        MIXF_MAINVOL, "MAINVOL"}, {
+        MIXF_PCMVOL, "PCMVOL"}, {
+        MIXF_RECVOL, "RECVOL"}, {
+        MIXF_MONVOL, "MONVOL"}, {
+        MIXF_DESCR, "DESCR"},
+
+        /* now the rest in the right order */
+        {
+        MIXF_READABLE, "READABLE"}, {
+        MIXF_WRITEABLE, "WRITABLE"}, {
+        MIXF_POLL, "POLL"}, {
+        MIXF_HZ, "HZ"}, {
+        MIXF_STRING, "STRING"}, {
+        MIXF_DYNAMIC, "DYNAMIC"}, {
+        MIXF_OKFAIL, "OKFAIL"}, {
+        MIXF_FLAT, "FLAT"}, {
+        MIXF_LEGACY, "LEGACY"}, {
+        MIXF_CENTIBEL, "CENTIBEL"}, {
+        MIXF_DECIBEL, "DECIBEL"}, {
+        MIXF_WIDE, "WIDE"}
+    };
+    int num_flags = (sizeof (all_flags) / sizeof ((all_flags)[0]));
+    int i;
+
+    if (flags == 0) {
+        pa_log_debug ("  flags  : None");
+        return;
+    }
+
+    for (i=0; i < num_flags; i++) {
+        if ((flags & all_flags[i].flag)) {
+            pa_log_debug ("  flag   : %s", all_flags[i].nick);
+            flags &= ~all_flags[i].flag;      /* unset */
+        }
+    }
+
+    /* Unknown flags? */
+    if (flags != 0) {
+        pa_log_debug ("  flag   : ????");
+    }
+
+    return;
+}
+
+static void sink_get_volume(pa_sink *s) {
+    struct userdata *u;
+
+    pa_assert_se(u = s->userdata);
+
+    if (pa_oss_get_volume(u->mixer_dsp_fd, &(u->sink_mixext), &s->sample_spec, &s->real_volume) >= 0)
+        return;
+
+    pa_log_info("Device doesn't support reading mixer settings: %s", pa_cstrerror(errno));
+}
+
+static void sink_set_volume(pa_sink *s) {
+    struct userdata *u;
+
+    pa_assert_se(u = s->userdata);
+
+    if (pa_oss_set_volume(u->mixer_dsp_fd, &(u->sink_mixext), &s->sample_spec, &s->real_volume) >= 0)
+        return;
+
+    pa_log_info("Device doesn't support writing mixer settings: %s", pa_cstrerror(errno));
+}
+
+static void source_get_volume(pa_source *s) {
+    struct userdata *u;
+
+    pa_assert_se(u = s->userdata);
+
+    if (pa_oss_get_volume(u->mixer_dsp_fd, &(u->source_mixext), &s->sample_spec, &s->real_volume) >= 0)
+        return;
+
+    pa_log_info("Device doesn't support reading mixer settings: %s", pa_cstrerror(errno));
+}
+
+static void source_set_volume(pa_source *s) {
+    struct userdata *u;
+
+    pa_assert_se(u = s->userdata);
+
+    if (pa_oss_set_volume(u->mixer_dsp_fd, &(u->source_mixext), &s->sample_spec, &s->real_volume) >= 0)
+        return;
+
+    pa_log_info("Device doesn't support writing mixer settings: %s", pa_cstrerror(errno));
+}
+
+#else
+
 static void sink_get_volume(pa_sink *s) {
     struct userdata *u;
 
@@ -880,6 +1049,7 @@ static void source_set_volume(pa_source *s) {
 
     pa_log_info("Device doesn't support writing mixer settings: %s", pa_cstrerror(errno));
 }
+#endif
 
 static void thread_func(void *userdata) {
     struct userdata *u = userdata;
@@ -1162,6 +1332,11 @@ finish:
 
 int pa__init(pa_module*m) {
 
+#ifdef HAVE_OSSV4
+    struct oss_sysinfo si = { {0,}, };
+    struct oss_mixerinfo mi = { 0, };
+#endif
+
     struct audio_buf_info info;
     struct userdata *u = NULL;
     const char *dev;
@@ -1259,7 +1434,9 @@ int pa__init(pa_module*m) {
     m->userdata = u;
     u->fd = fd;
     u->mixer_fd = -1;
+#ifndef HAVE_OSSV4
     u->mixer_devmask = 0;
+#endif
     u->use_getospace = u->use_getispace = true;
     u->use_getodelay = true;
     u->mode = mode;
@@ -1426,7 +1603,195 @@ int pa__init(pa_module*m) {
     if ((u->mixer_fd = pa_oss_open_mixer_for_device(u->device_name)) >= 0) {
         bool do_close = true;
 
-        if (ioctl(u->mixer_fd, SOUND_MIXER_READ_DEVMASK, &u->mixer_devmask) < 0)
+#ifdef HAVE_OSSV4
+#define IGNORE_DEV 1
+        int i;
+
+        u->mixer_dsp_fd = -1;
+
+        if (ioctl (u->mixer_fd, SNDCTL_SYSINFO, &si) < 0) {
+            pa_log_debug ("SNDCTL_SYSINFO failed");
+            goto fail;
+        }
+        for (i = 0; i < si.nummixers; i++) {
+            mi.dev = i;
+            if (ioctl (u->mixer_fd, SNDCTL_MIXERINFO, &mi) < 0) {
+                pa_log_debug("SNDCTL_MIXERINFO failed");
+                goto fail;
+            }
+            if (mi.enabled != 0) {
+                /*
+                 * There could be multiple mixers. First we only care about
+                 * ones which are enabled.  In any case we should not touch
+                 * disabled mixers!  But beyond that it may not be clear which
+                 * one to use!  There is a way to relate the card number to the
+                 * device node name. But there does not seem to be a real good
+                 * way to chose which one to use.  So maybe an env. var. could
+                 * be used to select a dsp device node name and then pick the
+                 * correct mixer number.  (See load_devices() in audioctl).
+                 * This code now will always pick the first enabled mixer
+                 * found.  Which may be wrong for multiple mixers and/or sound
+                 * cards.  It may be possible/desirable to control all mixers
+                 * found at the same time???
+                 */
+                break;
+            }
+        }
+
+        if (i < si.nummixers) {
+            struct stat sbuf;
+
+            if ((stat(mi.devnode, &sbuf) != 0) ||
+                ((sbuf.st_mode & S_IFCHR) == 0)) {
+                pa_log("Failed to get mixer dsp device.");
+                i = si.nummixers;
+            }
+        }
+
+        if (i < si.nummixers &&
+           (u->mixer_dsp_fd = pa_oss_open_mixer(mi.devnode)) >= 0) {
+
+            /* Will cause for loop to exit if not filled in by OSS */
+            u->mixer_cmax = -1;
+            if (ioctl(u->mixer_dsp_fd, SNDCTL_MIX_NREXT, &u->mixer_cmax) < 0) {
+                pa_log("Failed to get max control.");
+                goto fail;
+            }
+
+            pa_log_debug ("Opened mixer device %d with %d controls\n",
+                          mi.dev, mi.nrext);
+
+            u->mixer_sink_control   = -1;
+            u->mixer_source_control = -1;
+
+            for (i=0; i < u->mixer_cmax; i++) {
+                memset (&(u->sink_mixext), 0, sizeof (oss_mixext));
+
+#ifdef IGNORE_DEV
+                /* This will cause dev to be ignored */
+                u->sink_mixext.dev = -1;
+#else
+                u->sink_mixext.dev = mi.dev;
+#endif
+
+                /*
+                 * The real way to pick a control on a mixer is with this
+                 * number.  Note that control numbers are unique across all
+                 * mixers. So dev can just be ignored.  When dev is included
+                 * it will only be used to check for correct dev from
+                 * userland.  But it will not be used to select a mixer.
+                 */
+                u->sink_mixext.ctrl = i;
+
+                pa_log_debug ("Control %d", u->sink_mixext.ctrl);
+
+                if (ioctl (u->mixer_dsp_fd, SNDCTL_MIX_EXTINFO,
+                         &(u->sink_mixext)) < 0) {
+                    pa_log_debug ("SNDCTL_MIX_EXTINFO failed");
+                    continue;
+                }
+
+                pa_log_debug ("  name   : %s", u->sink_mixext.extname);
+                pa_log_debug ("  type   : %s (%d)",
+                              mixer_ext_type_get_name (u->sink_mixext.type),
+                              u->sink_mixext.type);
+                pa_log_debug ("  maxval : %d", u->sink_mixext.maxvalue);
+                pa_log_debug ("  parent : %d", u->sink_mixext.parent);
+                mixer_showflags (u->sink_mixext.flags);
+
+                if ((u->sink_mixext.flags & MIXF_PCMVOL)) {
+                    pa_log_debug ("First PCM control: %d", i);
+                    u->mixer_sink_control = i;
+                    break;
+                }
+
+                /*
+                 * Note that MIXF_MAINVOL may not be an exclusive single
+                 * control.  For example on AudioHD there will be one for each
+                 * output jack (Green, Black, Orange...).  So to really do a
+                 * master volume you would need to do all MIXF_MAINVOL at the
+                 * same time...
+                 */
+                if (((u->sink_mixext.flags & MIXF_MAINVOL)) &&
+                      u->mixer_sink_control == -1) {
+                    pa_log_debug ("First main volume control: %d", i);
+                    u->mixer_sink_control = i;
+                }
+            }
+
+            if (u->mixer_sink_control != -1) {
+                pa_log_debug ("Setting OSS sink callbacks.");
+                pa_sink_set_get_volume_callback(u->sink, sink_get_volume);
+                pa_sink_set_set_volume_callback(u->sink, sink_set_volume);
+                u->sink->n_volume_steps = 101;
+                do_close = FALSE;
+            } else {
+                pa_log_debug ("Not setting OSS sink callbacks.");
+            }
+
+            for (i=0; i < mi.nrext; i++) {
+                memset (&(u->source_mixext), 0, sizeof (oss_mixext));
+#ifdef IGNORE_DEV
+                /* This will cause dev to be ignored */
+                u->source_mixext.dev = -1;
+#else
+                u->source_mixext.dev = mi.dev;
+#endif
+                /*
+                 * The real way to pick a control on a mixer is with this
+                 * number.  Note that control numbers are unique across all
+                 * mixers.  So dev can just be ignored.  When dev is included
+                 * it will only be used to check for correct dev from userland.
+                 * But it will not be used to select a mixer.
+                 */
+                u->source_mixext.ctrl = i;
+
+                pa_log_debug ("Control %d", u->source_mixext.ctrl);
+
+                if (ioctl (u->mixer_dsp_fd, SNDCTL_MIX_EXTINFO,
+                         &(u->source_mixext)) == -1) {
+                    pa_log_debug ("SNDCTL_MIX_EXTINFO failed");
+                    continue;
+                }
+
+                pa_log_debug ("  name   : %s", u->source_mixext.extname);
+                pa_log_debug ("  type   : %s (%d)",
+                              mixer_ext_type_get_name (u->source_mixext.type),
+                              u->source_mixext.type);
+                pa_log_debug ("  maxval : %d", u->source_mixext.maxvalue);
+                pa_log_debug ("  parent : %d", u->source_mixext.parent);
+                mixer_showflags (u->source_mixext.flags);
+
+                /*
+                 * There may be more then one MIXF_RECVOL on a mixer.  In fact
+                 * for audioHD the can be three (line-in, mix-in, and cd-in).
+                 * For a master gain it may be good to adjust all...
+                 */
+                if ((u->source_mixext.flags & MIXF_RECVOL)) {
+                    pa_log_debug ("First REC control: %d", i);
+                    u->mixer_source_control = i;
+                    break;
+                }
+            }
+
+            if (u->mixer_source_control != -1) {
+                pa_log_debug ("Setting OSS source callbacks.");
+                pa_source_set_get_volume_callback(u->source, source_get_volume);
+                pa_source_set_set_volume_callback(u->source, source_set_volume);
+                u->source->n_volume_steps = 101;
+                do_close = FALSE;
+            } else {
+                pa_log_debug ("Not setting OSS source callbacks.");
+            }
+
+            if (do_close == TRUE) {
+                pa_close(u->mixer_dsp_fd);
+                u->mixer_dsp_fd = -1;
+            }
+        }
+
+#else
+        if (ioctl(fd, SOUND_MIXER_READ_DEVMASK, &u->mixer_devmask) < 0)
             pa_log_warn("SOUND_MIXER_READ_DEVMASK failed: %s", pa_cstrerror(errno));
         else {
             if (u->sink && (u->mixer_devmask & (SOUND_MASK_VOLUME|SOUND_MASK_PCM))) {
@@ -1445,11 +1810,14 @@ int pa__init(pa_module*m) {
                 do_close = false;
             }
         }
+#endif
 
         if (do_close) {
             pa_close(u->mixer_fd);
             u->mixer_fd = -1;
+#ifndef HAVE_OSSV4
             u->mixer_devmask = 0;
+#endif
         }
     }
 
@@ -1568,6 +1936,10 @@ void pa__done(pa_module*m) {
     if (u->fd >= 0)
         pa_close(u->fd);
 
+#ifdef HAVE_OSSV4
+    if (u->mixer_dsp_fd >= 0)
+        pa_close(u->mixer_dsp_fd);
+#endif
     if (u->mixer_fd >= 0)
         pa_close(u->mixer_fd);
 

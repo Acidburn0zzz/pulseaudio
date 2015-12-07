@@ -246,6 +246,190 @@ int pa_oss_set_fragments(int fd, int nfrags, int frag_size) {
     return 0;
 }
 
+#ifdef HAVE_OSSV4
+static int
+oss4_mixer_slider_pack_volume (oss_mixext *mixext, int channels, const pa_cvolume *volume)
+{
+  int val  = 0;
+  int lvol = 0;
+  int rvol = 0;
+  int lval = 0;
+  int rval = 0;
+
+  switch (mixext->type) {
+    case MIXT_MONOSLIDER:
+    case MIXT_MONOSLIDER16:
+    case MIXT_SLIDER:
+      lvol = volume->values[0] > PA_VOLUME_NORM ? PA_VOLUME_NORM : volume->values[0];
+      val = (lvol*mixext->maxvalue)/PA_VOLUME_NORM;
+      break;
+
+    case MIXT_STEREOSLIDER:
+      lvol = volume->values[0] > PA_VOLUME_NORM ? PA_VOLUME_NORM : volume->values[0];
+      lval = (lvol*mixext->maxvalue)/PA_VOLUME_NORM;
+      if (channels >= 2) {
+          rvol = volume->values[1] > PA_VOLUME_NORM ? PA_VOLUME_NORM : volume->values[1];
+          rval = (rvol*mixext->maxvalue)/PA_VOLUME_NORM;
+      }
+     
+      val = ((rval & 0xff) << 8) | (lval & 0xff);
+      break;
+
+    case MIXT_STEREOSLIDER16:
+      lvol = volume->values[0] > PA_VOLUME_NORM ? PA_VOLUME_NORM : volume->values[0];
+      lval = (lvol*mixext->maxvalue)/PA_VOLUME_NORM;
+      if (channels >= 2) {
+          rvol = volume->values[1] > PA_VOLUME_NORM ? PA_VOLUME_NORM : volume->values[1];
+          rval = (rvol*mixext->maxvalue)/PA_VOLUME_NORM;
+      }
+
+      val = ((rval & 0xffff) << 16) | (lval & 0xffff);
+
+      break;
+
+    default:
+      return 0;
+  }
+
+  return val;
+}
+
+static void
+oss4_mixer_slider_unpack_volume (oss_mixext *mixext, int v, pa_cvolume * volume)
+{
+  uint32_t val, vol;
+
+  val = (uint32_t) v;
+  switch (mixext->type) {
+    case MIXT_SLIDER:
+      vol = val;
+      volume->values[0] = PA_CLAMP_VOLUME((vol * PA_VOLUME_NORM) / mixext->maxvalue);
+      if (volume->channels >= 2) {
+          volume->values[1] = volume->values[0];
+      }
+      break;
+    case MIXT_MONOSLIDER:
+      /* oss repeats the value in the upper bits, as if it was stereo */
+      vol = val & 0x00ff;
+      volume->values[0] = PA_CLAMP_VOLUME((vol * PA_VOLUME_NORM) / mixext->maxvalue);
+      if (volume->channels >= 2) {
+          volume->values[1] = volume->values[0];
+      }
+      break;
+    case MIXT_MONOSLIDER16:
+      /* oss repeats the value in the upper bits, as if it was stereo */
+      vol = val & 0x0000ffff;
+      volume->values[0] = PA_CLAMP_VOLUME((vol * PA_VOLUME_NORM) / mixext->maxvalue);
+      if (volume->channels >= 2) {
+          volume->values[1] = volume->values[0];
+      }
+      break;
+    case MIXT_STEREOSLIDER:
+      vol = (val & 0x00ff);
+      volume->values[0] = PA_CLAMP_VOLUME((vol * PA_VOLUME_NORM) / mixext->maxvalue);
+      if (volume->channels >= 2) {
+          vol = (val & 0xff00) >> 8;
+          volume->values[1] = PA_CLAMP_VOLUME((vol * PA_VOLUME_NORM) / mixext->maxvalue);
+      }
+      break;
+    case MIXT_STEREOSLIDER16:
+      vol = (val & 0x0000ffff);
+      volume->values[0] = PA_CLAMP_VOLUME((vol * PA_VOLUME_NORM) / mixext->maxvalue);
+      if (volume->channels >= 2) {
+          vol = (val & 0xffff0000) >> 16;
+          volume->values[1] = PA_CLAMP_VOLUME((vol * PA_VOLUME_NORM) / mixext->maxvalue);
+      }
+      break;
+    default:
+      return;
+  }
+}
+
+static int
+oss4_mixer_get_control_val (int fd, oss_mixext *mixext, int *val)
+{
+  oss_mixer_value ossval = { 0, };
+
+  /* ossval.dev = mixext->dev; */
+  ossval.dev = -1;		/* if -1 on entry then is ignored */
+  /*
+   * The real way to pick a control on a mixer is with this number.
+   * Note that control numbers are uniq across all mixers. So dev
+   * can just be ignored. When dev is included it will only be used
+   * to check for correct dev from userland. But it will not be used
+   * to select a mixer.
+   */
+  ossval.ctrl = mixext->ctrl;
+  ossval.timestamp = mixext->timestamp;
+
+  if (ioctl (fd, SNDCTL_MIX_READ, &ossval) == -1) {
+    pa_log_debug ("SNDCTL_MIX_READ failed");
+    *val = 0;
+    return -1;
+  }
+
+  *val = ossval.value;
+  pa_log_debug ("got value 0x%08x from %s", *val, mixext->extname);
+  return 0;
+}
+
+static int
+oss4_mixer_set_control_val (int fd, oss_mixext *mixext, int val)
+{
+  oss_mixer_value ossval = { 0, };
+
+  /* ossval.dev = mixext->dev; */
+  ossval.dev = -1;		/* if -1 on entry then is ignored */
+  /*
+   * The real way to pick a control on a mixer is with this number.
+   * Note that control numbers are uniq across all mixers. So dev
+   * can just be ignored. When dev is included it will only be used
+   * to check for correct dev from userland. But it will not be used
+   * to select a mixer.
+   */
+  ossval.ctrl = mixext->ctrl;
+  ossval.timestamp = mixext->timestamp;
+  ossval.value = val;
+
+  if (ioctl (fd, SNDCTL_MIX_WRITE, &ossval) == -1) {
+    pa_log_debug ("SNDCTL_MIX_WRITE failed");
+    return -1;
+  }
+
+  pa_log_debug ("set value 0x%08x on %s", val, mixext->extname);
+  return 0;
+}
+
+int pa_oss_get_volume(int fd, oss_mixext *mixext, const pa_sample_spec *ss, pa_cvolume *volume) {
+  int v = 0;
+
+  if (oss4_mixer_get_control_val (fd, mixext, &v) != 0) {
+    pa_log_debug ("Getting volume failed");
+    return -1;
+  }
+
+  pa_cvolume_reset(volume, ss->channels);
+
+  oss4_mixer_slider_unpack_volume (mixext, v, volume);
+
+  return 0;
+}
+
+int pa_oss_set_volume(int fd, oss_mixext *mixext, const pa_sample_spec *ss, const pa_cvolume *volume) {
+  int val = 0;
+
+  val = oss4_mixer_slider_pack_volume (mixext, ss->channels, volume);
+
+  if (oss4_mixer_set_control_val (fd, mixext, val) != 0) {
+    pa_log_debug ("Setting volume failed");
+    return -1;
+  }
+
+  return 0;
+}
+
+#else
+
 int pa_oss_get_volume(int fd, unsigned long mixer, const pa_sample_spec *ss, pa_cvolume *volume) {
     char cv[PA_CVOLUME_SNPRINT_VERBOSE_MAX];
     unsigned vol;
@@ -288,6 +472,7 @@ int pa_oss_set_volume(int fd, unsigned long mixer, const pa_sample_spec *ss, con
     pa_log_debug("Wrote mixer settings: %s", pa_cvolume_snprint(cv, sizeof(cv), volume));
     return 0;
 }
+#endif
 
 static int get_device_number(const char *dev) {
     const char *p, *e;
@@ -386,8 +571,10 @@ int pa_oss_get_hw_description(const char *dev, char *name, size_t l) {
     return r;
 }
 
-static int open_mixer(const char *mixer) {
+int pa_oss_open_mixer(const char *mixer) {
     int fd;
+
+    pa_log_debug ("Opening device %s", mixer);
 
     if ((fd = pa_open_cloexec(mixer, O_RDWR|O_NDELAY, 0)) >= 0)
         return fd;
@@ -400,19 +587,22 @@ int pa_oss_open_mixer_for_device(const char *device) {
     char *fn;
     int fd;
 
-    if ((n = get_device_number(device)) < 0)
+    if ((n = get_device_number(device)) < 0) {
+        pa_log_debug ("Cannot find device");
         return -1;
+    }
 
     if (n == 0)
-        if ((fd = open_mixer("/dev/mixer")) >= 0)
+        if ((fd = pa_oss_open_mixer("/dev/mixer")) >= 0)
             return fd;
 
     fn = pa_sprintf_malloc("/dev/mixer%i", n);
-    fd = open_mixer(fn);
+    fd = pa_oss_open_mixer(fn);
     pa_xfree(fn);
 
     if (fd < 0)
         pa_log_warn("Failed to open mixer '%s': %s", device, pa_cstrerror(errno));
+    else
 
     return fd;
 }
