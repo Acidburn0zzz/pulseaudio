@@ -121,7 +121,9 @@ PA_C_DECL_BEGIN
 #if defined(__sparc__) && defined(_BIG_ENDIAN)
 #define WORDS_BIGENDIAN
 #endif
-
+#if defined(_BIG_ENDIAN)
+#define WORDS_BIGENDIAN
+#endif
 #endif
 
 /** Maximum number of allowed channels */
