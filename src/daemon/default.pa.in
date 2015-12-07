@@ -54,7 +54,7 @@ ifelse(@HAVE_ALSA@, 1, [dnl
 #load-module module-alsa-source device=hw:1,0
 ])dnl
 ifelse(@HAVE_OSS_OUTPUT@, 1, [dnl
-#load-module module-oss device="/dev/dsp" sink_name=output source_name=input
+load-module module-oss device="/dev/dsp" sink_name=output source_name=input
 #load-module module-oss-mmap device="/dev/dsp" sink_name=output source_name=input
 ])dnl
 ifelse(@HAVE_WAVEOUT@, 1, [dnl
