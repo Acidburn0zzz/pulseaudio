@@ -48,6 +48,11 @@
 #include <linux/sockios.h>
 #endif
 
+/* Solaris/Illumos defines FIONREAD in filio.h */
+#ifdef __sun__
+#include <sys/filio.h>
+#endif
+
 #include <pulse/pulseaudio.h>
 #include <pulse/gccmacro.h>
 #include <pulsecore/llist.h>
