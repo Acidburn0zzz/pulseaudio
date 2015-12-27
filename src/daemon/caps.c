@@ -98,11 +98,21 @@ void pa_drop_caps(void) {
 #else /* HAVE_SYS_CAPABILITY_H */
 #if defined(__sun__) && defined(__SVR4)
     priv_set_t *sp;
-    pa_assert_se(sp = priv_allocset());
-    priv_emptyset(sp);
-    priv_addset(sp, PRIV_FILE_READ);
-    priv_addset(sp, PRIV_FILE_WRITE);
-    priv_addset(sp, PRIV_PROC_FORK);
+    /* Set basic privileges */
+    pa_assert_se(sp = priv_str_to_set("basic", ",", NULL));
+    //pa_assert_se(sp = priv_allocset());
+    //priv_emptyset(sp);
+    //priv_addset(sp, PRIV_FILE_LINK_ANY);
+    //priv_addset(sp, PRIV_FILE_READ);
+    //priv_addset(sp, PRIV_FILE_WRITE);
+    //priv_addset(sp, PRIV_NET_ACCESS);
+    //priv_addset(sp, PRIV_PROC_FORK);
+    //priv_addset(sp, PRIV_PROC_INFO);
+    //priv_addset(sp, PRIV_PROC_SESSION);
+    priv_addset(sp, PRIV_MULTIPLE);
+    priv_addset(sp, PRIV_PROC_CLOCK_HIGHRES); /* Use high resolution timers */
+    priv_addset(sp, PRIV_PROC_PRIOUP);        /* Raise process priority */
+    priv_addset(sp, PRIV_PROC_PRIOCNTL);      /* Change process scheduling class */
     if (setppriv(PRIV_SET, PRIV_PERMITTED, sp)) {
       pa_log_error("Unable to set permitted privileges");
     }
