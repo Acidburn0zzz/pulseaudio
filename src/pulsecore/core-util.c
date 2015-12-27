@@ -857,6 +857,10 @@ static int set_nice(int nice_level) {
         pa_log_debug("setpriority() worked.");
         return 0;
     }
+    else
+    {
+        pa_log_debug("setpriority() to %d failed, %s.", nice_level, pa_cstrerror(errno));
+    }
 #endif
 
 #ifdef HAVE_DBUS
