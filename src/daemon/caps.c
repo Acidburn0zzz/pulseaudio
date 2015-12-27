@@ -34,6 +34,10 @@
 #include <sys/capability.h>
 #endif
 
+#if defined(__sun__) && defined(__SVR4)
+#include <priv.h>
+#endif
+
 #include "caps.h"
 
 /* Glibc <= 2.2 has broken unistd.h */
@@ -92,8 +96,27 @@ void pa_drop_caps(void) {
 #error "Don't know how to do capabilities on your system.  Please send a patch."
 #endif /* __linux__ */
 #else /* HAVE_SYS_CAPABILITY_H */
+#if defined(__sun__) && defined(__SVR4)
+    priv_set_t *sp;
+    pa_assert_se(sp = priv_allocset());
+    priv_emptyset(sp);
+    priv_addset(sp, PRIV_FILE_READ);
+    priv_addset(sp, PRIV_FILE_WRITE);
+    priv_addset(sp, PRIV_PROC_FORK);
+    if (setppriv(PRIV_SET, PRIV_PERMITTED, sp)) {
+      pa_log_error("Unable to set permitted privileges");
+    }
+    if (setppriv(PRIV_SET, PRIV_LIMIT, sp)) {
+      pa_log_error("Unable to set privileges limits");
+    }
+    if (setppriv(PRIV_SET, PRIV_INHERITABLE, sp)) {
+      pa_log_error("Unable to set inheritable privileges");
+    }
+    priv_freeset(sp);
+#else
     pa_log_warn("Normally all extra capabilities would be dropped now, but "
                 "that's impossible because PulseAudio was built without "
                 "capabilities support.");
+#endif
 #endif
 }
