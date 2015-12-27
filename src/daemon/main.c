@@ -1000,7 +1000,7 @@ int main(int argc, char *argv[]) {
     if (pa_rtclock_hrtimer())
         pa_log_info("Fresh high-resolution timers available! Bon appetit.");
     else
-        pa_log_info("Dude, your kernel stinks! The chef's recommendation today is Linux with high-resolution timers enabled.");
+        pa_log_info("High-resolution timers unavailable.");
 
     if (conf->lock_memory) {
 #if defined(HAVE_SYS_MMAN_H) && !defined(__ANDROID__)
